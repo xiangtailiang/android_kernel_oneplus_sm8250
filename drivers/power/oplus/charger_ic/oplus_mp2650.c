@@ -1405,12 +1405,20 @@ int mp2650_disable_charging(void)
 		return 0;
 	}
 
-	chg_err(" mp2650_disable_charging \n");
-
 	if (atomic_read(&chip->charger_suspended) == 1) {
 		chg_err(" charger_suspended \n");
 		return 0;
 	}
+
+	/* Skip redundant I2C write if charging is already disabled.
+	 * Repeated writes to REG08 cause the MP2650 to re-evaluate its
+	 * input source, leading to Type-C CC state flapping and USB
+	 * disconnects on some platforms.
+	 */
+	if (mp2650_check_charging_enable() == 0)
+		return 0;
+
+	chg_err(" mp2650_disable_charging \n");
 	rc = mp2650_config_interface(REG08_MP2650_ADDRESS, REG08_MP2650_CHG_EN_DISABLE, REG08_MP2650_CHG_EN_MASK);
 	if (rc < 0) {
 		chg_err("Couldn't mp2650_disable_charging  rc = %d\n", rc);

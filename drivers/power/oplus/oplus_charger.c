@@ -8434,6 +8434,20 @@ static void oplus_check_battery_vol_diff(struct oplus_chg_chip *chg)
 
 static void oplus_chg_full_action(struct oplus_chg_chip *chip)
 {
+	/*
+	 * If full state was already processed, skip the redundant
+	 * charging_stop / disable_charging calls that cause repeated
+	 * I2C writes to the MP2650 charge-enable register.  Those
+	 * writes trigger Type-C CC-line state flapping and USB
+	 * disconnects.  We still check the recharge threshold so the
+	 * battery can resume charging when it drops below recharge_soc.
+	 */
+	if (chip->batt_full == true
+			&& chip->charging_state == CHARGING_STATUS_FULL) {
+		oplus_chg_check_rechg_status(chip);
+		return;
+	}
+
 	charger_xlog_printk(CHG_LOG_CRTI, "[BATTERY] Battery full !!\n");
 	oplus_chg_voter_charging_stop(chip, CHG_STOP_VOTER__FULL);
 	if (chip->batt_full == false) {
