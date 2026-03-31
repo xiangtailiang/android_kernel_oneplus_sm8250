@@ -7398,14 +7398,14 @@ static int fb_notifier_callback(struct notifier_block *nb, unsigned long event, 
 			g_charger_chip->led_on = true;
 			if (oplus_get_flash_screen_ctrl() == true && g_charger_chip->real_batt_full) {
 				oplus_chg_suspend_charger();
-				g_charger_chip->limits.recharge_mv = 60;
+				g_charger_chip->limits.recharge_mv = 300;
 			}
 			g_charger_chip->led_on_change = true;
 		} else if (blank == MSM_DRM_BLANK_POWERDOWN) {
 			g_charger_chip->led_on = false;
 			if (oplus_get_flash_screen_ctrl() == true && g_charger_chip->real_batt_full) {
 				g_charger_chip->chg_ops->charger_unsuspend();
-				g_charger_chip->limits.recharge_mv = 100;
+				g_charger_chip->limits.recharge_mv = 300;
 			}
 			g_charger_chip->led_on_change = true;
 		} else {
@@ -9172,10 +9172,10 @@ static void oplus_chg_protection_check(struct oplus_chg_chip *chip)
 			if (chip->batt_volt > 4350) {
 				if (chip->led_on) {
 					oplus_chg_suspend_charger();
-					chip->limits.recharge_mv = 60;
+					chip->limits.recharge_mv = 300;
 				} else {
 					chip->chg_ops->charger_unsuspend();
-					chip->limits.recharge_mv = 100;
+					chip->limits.recharge_mv = 300;
 				}
 			} else {
 				if (chip->batt_volt < 4300) {
@@ -11192,16 +11192,16 @@ static void oplus_chg_check_status_full(struct oplus_chg_chip *chip)
 				chip->real_batt_full = true;
 				if (chip->led_on) {
 					oplus_chg_suspend_charger();
-					chip->limits.recharge_mv = 60;
+					chip->limits.recharge_mv = 300;
 				} else {
 					chip->chg_ops->charger_unsuspend();
-					chip->limits.recharge_mv = 100;
+					chip->limits.recharge_mv = 300;
 				}
 			} else {
 				if (chip->batt_volt < 4300) {
 					chip->real_batt_full = false;
 					chip->chg_ops->charger_unsuspend();
-					chip->limits.recharge_mv = 100;
+					chip->limits.recharge_mv = 300;
 				}
 			}
 		}

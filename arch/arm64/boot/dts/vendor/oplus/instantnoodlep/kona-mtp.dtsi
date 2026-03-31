@@ -1120,7 +1120,7 @@
 	qcom,overtemp_bat_decidegc = <350>;
 	qcom,iterm_disabled = <0>;
 	qcom,iterm_ma = <230>;
-	qcom,recharge-mv = <100>;
+	qcom,recharge-mv = <300>;
 	qcom,batt_capacity_mah = <4510>; /* typical capacity */
 
 	qcom,removed_bat_decidegc = <190>; /* <-19C */

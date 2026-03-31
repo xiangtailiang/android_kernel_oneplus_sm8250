@@ -1386,12 +1386,16 @@ int mp2650_enable_charging(void)
 		return 0;
 	}
 
+	/* Skip redundant I2C write if charging is already enabled. */
+	if (mp2650_check_charging_enable() != 0)
+		return 0;
+
+	chg_err("mp2650_enable_charging\n");
 	rc = mp2650_config_interface(REG08_MP2650_ADDRESS, REG08_MP2650_CHG_EN_ENABLE, REG08_MP2650_CHG_EN_MASK);
 	if (rc < 0) {
-		chg_err("Couldn'tmp2650_enable_charging rc = %d\n", rc);
+		chg_err("Couldn't mp2650_enable_charging rc = %d\n", rc);
 	}
 
-	chg_err("mp2650_enable_charging \n");
 	return rc;
 }
 
@@ -1623,9 +1627,12 @@ int mp2650_suspend_charger(void)
 		return 0;
 	}
 
-	mp2650_config_interface(REG08_MP2650_ADDRESS, REG08_MP2650_LEARN_EN_ENABLE, REG08_MP2650_LEARN_EN_MASK);
+	/* Skip redundant I2C write if already suspended (LEARN_EN set). */
+	if (mp2650_check_suspend_charger())
+		return 0;
 
-	chg_err(" rc = %d\n", rc);
+	chg_err("mp2650_suspend_charger\n");
+	rc = mp2650_config_interface(REG08_MP2650_ADDRESS, REG08_MP2650_LEARN_EN_ENABLE, REG08_MP2650_LEARN_EN_MASK);
 	if (rc < 0) {
 		chg_err("Couldn't mp2650_suspend_charger rc = %d\n", rc);
 	}
@@ -1656,9 +1663,12 @@ int mp2650_unsuspend_charger(void)
 		return 0;
 	}
 #endif
-	mp2650_config_interface(REG08_MP2650_ADDRESS, REG08_MP2650_LEARN_EN_DISABLE, REG08_MP2650_LEARN_EN_MASK);
+	/* Skip redundant I2C write if already unsuspended (LEARN_EN clear). */
+	if (!mp2650_check_suspend_charger())
+		return 0;
 
-	chg_err(" rc = %d\n", rc);
+	chg_err("mp2650_unsuspend_charger\n");
+	rc = mp2650_config_interface(REG08_MP2650_ADDRESS, REG08_MP2650_LEARN_EN_DISABLE, REG08_MP2650_LEARN_EN_MASK);
 	if (rc < 0) {
 		chg_err("Couldn't mp2650_unsuspend_charger rc = %d\n", rc);
 	}
