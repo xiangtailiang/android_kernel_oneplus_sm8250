@@ -6687,6 +6687,14 @@ void oplus_chg_turn_on_charging(struct oplus_chg_chip *chip)
 	if (!chip->mmi_chg) {
 		return;
 	}
+
+	/* Dev charge limit: block ALL charging above 75% SOC.
+	 * This is the single choke point for every code path that
+	 * tries to enable charging (AICL, temp recovery, FFC, etc.).
+	 */
+	if (chip->soc >= 75) {
+		return;
+	}
 	if (oplus_ufcs_get_chg_status() == UFCS_CHARGERING) {
 		return;
 	}
