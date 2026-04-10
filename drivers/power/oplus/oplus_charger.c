@@ -6823,6 +6823,8 @@ static void oplus_chg_voter_charging_start(struct oplus_chg_chip *chip, OPLUS_CH
 	switch (voter) {
 	case CHG_STOP_VOTER__FULL:
 		chip->charging_state = CHARGING_STATUS_CCCV;
+		if (chip->chg_ops->oplus_chg_wdt_enable)
+			chip->chg_ops->oplus_chg_wdt_enable(true);
 		if (oplus_vooc_get_allow_reading() == true) {
 			if (oplus_switching_support_parallel_chg()) {
 				oplus_switching_enable_charge(1);
@@ -6865,6 +6867,8 @@ void oplus_chg_voter_charging_stop(struct oplus_chg_chip *chip, OPLUS_CHG_STOP_V
 				oplus_chg_turn_off_charging(chip);
 			}
 		}
+		if (chip->chg_ops->oplus_chg_wdt_enable)
+			chip->chg_ops->oplus_chg_wdt_enable(false);
 		break;
 	case CHG_STOP_VOTER__VCHG_ABNORMAL:
 		chip->charging_state = CHARGING_STATUS_FAIL;
@@ -8339,8 +8343,9 @@ static void oplus_chg_check_rechg_status(struct oplus_chg_chip *chip)
 		return;
 	}
 
-	if (chip->mmi_chg == 0) {
-		charger_xlog_printk(CHG_LOG_CRTI, " mmi_chg,return\n");
+	/* Dev charge limit: don't recharge while SOC is still high. */
+	if (chip->soc >= 75) {
+		rechging_cnt = 0;
 		return;
 	}
 
@@ -11184,7 +11189,7 @@ static void oplus_chg_check_status_full(struct oplus_chg_chip *chip)
 	}
 
 	if ((is_batt_full == 1) || (chip->charging_state == CHARGING_STATUS_FULL) ||
-	    oplus_chg_check_vbatt_is_full_by_sw(chip)) {
+	    oplus_chg_check_vbatt_is_full_by_sw(chip) || (chip->soc >= 80)) {
 		charger_xlog_printk(CHG_LOG_CRTI, "is_batt_full : %d,  chip->charging_state= %d\n", is_batt_full,
 				    chip->charging_state);
 		if (oplus_get_flash_screen_ctrl() == true) {
@@ -11549,7 +11554,8 @@ static void oplus_chg_other_thing(struct oplus_chg_chip *chip)
 	static int choose_curve_count = OPLUS_CHOOSE_CURVE_COUNT;
 
 	if (oplus_vooc_get_fastchg_started() == false) {
-		chip->chg_ops->kick_wdt();
+		if (chip->chging_on)
+			chip->chg_ops->kick_wdt();
 		chip->chg_ops->dump_registers();
 	}
 	if (chip->charger_exist) {

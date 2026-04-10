@@ -422,8 +422,21 @@ static int mp2650_config_interface(int RegNum, int val, int MASK)
 	}
 	//chg_err(" Reg[%x]=0x%x %d\n", RegNum, mp2650_reg, MASK);
 
-	mp2650_reg &= ~MASK;
-	mp2650_reg |= val;
+	{
+		int orig_reg = mp2650_reg;
+
+		mp2650_reg &= ~MASK;
+		mp2650_reg |= val;
+
+		/* Skip redundant writes to REG08 — any write to this register
+		 * causes the MP2650 to re-evaluate its input source, triggering
+		 * Type-C CC-line flapping and USB disconnects.
+		 */
+		if (RegNum == REG08_MP2650_ADDRESS && mp2650_reg == orig_reg) {
+			mutex_unlock(&mp2650_i2c_access);
+			return 0;
+		}
+	}
 
 	//chg_err(" write Reg[%x]=0x%x %d\n", RegNum, mp2650_reg, val);
 
