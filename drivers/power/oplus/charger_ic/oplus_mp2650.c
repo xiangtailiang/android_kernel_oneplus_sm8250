@@ -1386,9 +1386,13 @@ static void mp2650_wdt_enable(bool wdt_enable)
 	chg_err("mp2650_wdt_enable[%d]\n", wdt_enable);
 }
 
+static int mp2650_get_charging_enable_state(int *charging_enabled);
+static int mp2650_get_suspend_charger_state(bool *charger_suspended);
+
 int mp2650_enable_charging(void)
 {
 	int rc;
+	int charging_enabled = 0;
 	struct chip_mp2650 *chip = charger_ic;
 
 	if (!chip) {
@@ -1400,7 +1404,8 @@ int mp2650_enable_charging(void)
 	}
 
 	/* Skip redundant I2C write if charging is already enabled. */
-	if (mp2650_check_charging_enable() != 0)
+	rc = mp2650_get_charging_enable_state(&charging_enabled);
+	if (!rc && charging_enabled)
 		return 0;
 
 	chg_err("mp2650_enable_charging\n");
@@ -1415,6 +1420,7 @@ int mp2650_enable_charging(void)
 int mp2650_disable_charging(void)
 {
 	int rc;
+	int charging_enabled = 0;
 	struct chip_mp2650 *chip = charger_ic;
 
 	if (!chip) {
@@ -1432,7 +1438,8 @@ int mp2650_disable_charging(void)
 	 * input source, leading to Type-C CC state flapping and USB
 	 * disconnects on some platforms.
 	 */
-	if (mp2650_check_charging_enable() == 0)
+	rc = mp2650_get_charging_enable_state(&charging_enabled);
+	if (!rc && !charging_enabled)
 		return 0;
 
 	chg_err(" mp2650_disable_charging \n");
@@ -1444,24 +1451,45 @@ int mp2650_disable_charging(void)
 	return rc;
 }
 
-int mp2650_check_charging_enable(void)
+static int mp2650_get_charging_enable_state(int *charging_enabled)
 {
 	int rc = 0;
 	int reg_val = 0;
 	struct chip_mp2650 *chip = charger_ic;
 
-	bool charging_enable = false;
+	if (!charging_enabled) {
+		return -EINVAL;
+	}
+	*charging_enabled = 0;
 
+	if (!chip) {
+		chg_err("chip is NULL\n");
+		return -ENODEV;
+	}
 	if (atomic_read(&chip->charger_suspended) == 1) {
 		return 0;
 	}
 	rc = mp2650_read_reg(REG08_MP2650_ADDRESS, &reg_val);
 	if (rc) {
 		chg_err("Couldn't read REG08_MP2650_ADDRESS rc = %d\n", rc);
-		return 0;
+		return rc;
 	}
 
-	charging_enable = ((reg_val & REG08_MP2650_CHG_EN_MASK) == REG08_MP2650_CHG_EN_ENABLE) ? 1 : 0;
+	*charging_enabled =
+		((reg_val & REG08_MP2650_CHG_EN_MASK) == REG08_MP2650_CHG_EN_ENABLE) ? 1 : 0;
+
+	return 0;
+}
+
+int mp2650_check_charging_enable(void)
+{
+	int rc = 0;
+	int charging_enable = 0;
+
+	rc = mp2650_get_charging_enable_state(&charging_enable);
+	if (rc < 0) {
+		return 0;
+	}
 
 	return charging_enable;
 }
@@ -1603,15 +1631,20 @@ int mp2650_registers_read_full(void)
 	return 0;
 }
 
-bool mp2650_check_suspend_charger(void)
+static int mp2650_get_suspend_charger_state(bool *charger_suspended)
 {
 	int rc = 0;
 	struct chip_mp2650 *chip = charger_ic;
 	int data = 0;
 
+	if (!charger_suspended) {
+		return -EINVAL;
+	}
+	*charger_suspended = false;
+
 	if (!chip) {
 		chg_err("chip is NULL\n");
-		return 0;
+		return -ENODEV;
 	}
 
 	if (atomic_read(&chip->charger_suspended) == 1) {
@@ -1621,16 +1654,32 @@ bool mp2650_check_suspend_charger(void)
 	rc = mp2650_read_reg(REG08_MP2650_ADDRESS, &data);
 	if (rc) {
 		chg_err("Couldn't read REG1C1D_MP2650_ADDRESS rc = %d\n", rc);
-		return 0;
+		return rc;
 	}
 
-	return (data & REG08_MP2650_LEARN_EN_MASK);
+	*charger_suspended = !!(data & REG08_MP2650_LEARN_EN_MASK);
+
+	return 0;
+}
+
+bool mp2650_check_suspend_charger(void)
+{
+	int rc = 0;
+	bool charger_suspended = false;
+
+	rc = mp2650_get_suspend_charger_state(&charger_suspended);
+	if (rc < 0) {
+		return false;
+	}
+
+	return charger_suspended;
 }
 
 int mp2650_suspend_charger(void)
 {
 	int rc = 0;
 	struct chip_mp2650 *chip = charger_ic;
+	bool charger_suspended = false;
 
 	if (!chip) {
 		chg_err("chip is NULL\n");
@@ -1641,7 +1690,8 @@ int mp2650_suspend_charger(void)
 	}
 
 	/* Skip redundant I2C write if already suspended (LEARN_EN set). */
-	if (mp2650_check_suspend_charger())
+	rc = mp2650_get_suspend_charger_state(&charger_suspended);
+	if (!rc && charger_suspended)
 		return 0;
 
 	chg_err("mp2650_suspend_charger\n");
@@ -1659,6 +1709,7 @@ int mp2650_unsuspend_charger(void)
 #endif
 	int rc = 0;
 	struct chip_mp2650 *chip = charger_ic;
+	bool charger_suspended = false;
 
 	if (!chip) {
 		chg_err("chip is NULL\n");
@@ -1677,7 +1728,8 @@ int mp2650_unsuspend_charger(void)
 	}
 #endif
 	/* Skip redundant I2C write if already unsuspended (LEARN_EN clear). */
-	if (!mp2650_check_suspend_charger())
+	rc = mp2650_get_suspend_charger_state(&charger_suspended);
+	if (!rc && !charger_suspended)
 		return 0;
 
 	chg_err("mp2650_unsuspend_charger\n");

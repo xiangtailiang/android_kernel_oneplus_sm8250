@@ -6678,6 +6678,26 @@ void oplus_chg_turn_on_ffc2(struct oplus_chg_chip *chip)
 	oplus_chg_set_iterm(chip);
 }
 
+static bool oplus_chg_dev_charge_limit_active(struct oplus_chg_chip *chip)
+{
+	return chip && chip->soc >= 75;
+}
+
+static bool oplus_chg_block_dev_charge_limit(struct oplus_chg_chip *chip)
+{
+	if (!oplus_chg_dev_charge_limit_active(chip)) {
+		return false;
+	}
+
+	chip->chging_on = false;
+	chip->stop_voter |= (int)CHG_STOP_VOTER__FULL;
+	chip->charging_state = CHARGING_STATUS_FULL;
+	if (chip->chg_ops->oplus_chg_wdt_enable)
+		chip->chg_ops->oplus_chg_wdt_enable(false);
+
+	return true;
+}
+
 void oplus_chg_turn_on_charging(struct oplus_chg_chip *chip)
 {
 	if (!chip->authenticate) {
@@ -6688,11 +6708,10 @@ void oplus_chg_turn_on_charging(struct oplus_chg_chip *chip)
 		return;
 	}
 
-	/* Dev charge limit: block ALL charging above 75% SOC.
-	 * This is the single choke point for every code path that
-	 * tries to enable charging (AICL, temp recovery, FFC, etc.).
+	/* Test-device charge cap: keep long-running ADB sessions below the
+	 * recharge window and avoid repeated charge-state transitions.
 	 */
-	if (chip->soc >= 75) {
+	if (oplus_chg_dev_charge_limit_active(chip)) {
 		return;
 	}
 	if (oplus_ufcs_get_chg_status() == UFCS_CHARGERING) {
@@ -6823,6 +6842,9 @@ static void oplus_chg_voter_charging_start(struct oplus_chg_chip *chip, OPLUS_CH
 	}
 	chip->chging_on = true;
 	chip->stop_voter &= ~(int)voter;
+	if (oplus_chg_block_dev_charge_limit(chip)) {
+		return;
+	}
 	if (oplus_voocphy_get_bidirect_cp_support()) {
 		oplus_voocphy_set_chg_auto_mode(false);
 	}
@@ -8351,8 +8373,8 @@ static void oplus_chg_check_rechg_status(struct oplus_chg_chip *chip)
 		return;
 	}
 
-	/* Dev charge limit: don't recharge while SOC is still high. */
-	if (chip->soc >= 75) {
+	/* Test-device charge cap: hold recharge until SOC leaves the cap window. */
+	if (oplus_chg_dev_charge_limit_active(chip)) {
 		rechging_cnt = 0;
 		return;
 	}
