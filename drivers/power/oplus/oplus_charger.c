@@ -7881,7 +7881,18 @@ void oplus_chg_variables_reset(struct oplus_chg_chip *chip, bool in)
 	oplus_ufcs_variables_reset(in);
 	if (in) {
 		chip->charger_exist = true;
-		chip->chging_on = true;
+
+		/* Dev charge limit: on charger reconnect with high SOC,
+		 * go straight to FULL state to avoid a Battery-full REG08
+		 * write that triggers a cascade of USB disconnects.
+		 */
+		if (chip->soc >= 75) {
+			chip->chging_on = false;
+			chip->batt_full = true;
+			chip->charging_state = CHARGING_STATUS_FULL;
+		} else {
+			chip->chging_on = true;
+		}
 		chip->slave_charger_enable = false;
 		if (chip->hmac == false && chip->external_authenticate) {
 			chip->hmac = oplus_gauge_get_batt_external_hmac();
