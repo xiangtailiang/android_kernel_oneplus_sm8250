@@ -6479,6 +6479,24 @@ void smblib_usb_plugin_locked(struct smb_charger *chg)
 	}
 
 	vbus_rising = (bool)(stat & USBIN_PLUGIN_RT_STS_BIT);
+
+	/*
+	 * VBUS debounce: when dev charge limit is active and an unplug is
+	 * detected, wait briefly and re-check. Transient VBUS dips (caused
+	 * by load spikes on degraded USB connections) recover within ~50ms
+	 * and should not trigger a full USB disconnect sequence.
+	 */
+	if (!vbus_rising && g_oplus_chip && g_oplus_chip->soc >= 75) {
+		u8 recheck;
+
+		msleep(500);
+		rc = smblib_read(chg, USBIN_BASE + INT_RT_STS_OFFSET, &recheck);
+		if (rc == 0 && (recheck & USBIN_PLUGIN_RT_STS_BIT)) {
+			pr_info("[OPLUS_CHG] vbus_debounce: transient dip ignored\n");
+			return;
+		}
+	}
+
 #ifdef OPLUS_FEATURE_CHG_BASIC
 	oplus_chg_track_check_wired_charging_break(vbus_rising);
 	chg->real_chg_type = POWER_SUPPLY_TYPE_UNKNOWN;
