@@ -1862,6 +1862,7 @@ bool oplus_get_vooc_start_fg(void);
 int oplus_chg_get_fv_when_vooc(struct oplus_chg_chip *chip);
 void oplus_chg_get_aging_ffc_offset(struct oplus_chg_chip *chip, int *ffc1_offset, int *ffc2_offset);
 int oplus_get_ccdetect_online(void);
+void oplus_ccdetect_disable(void);
 bool oplus_chg_get_led_status(void);
 int oplus_chg_adspvoocphy_get_abnormal_adapter_disconnect_cnt(void);
 #if IS_ENABLED(CONFIG_OPLUS_CHG_TEST_KIT)

@@ -6695,6 +6695,9 @@ static bool oplus_chg_block_dev_charge_limit(struct oplus_chg_chip *chip)
 	if (chip->chg_ops->oplus_chg_wdt_enable)
 		chip->chg_ops->oplus_chg_wdt_enable(false);
 
+	/* Lock Type-C to SNK_ONLY to prevent CC toggling / VBUS instability */
+	oplus_ccdetect_disable();
+
 	return true;
 }
 
@@ -7890,6 +7893,8 @@ void oplus_chg_variables_reset(struct oplus_chg_chip *chip, bool in)
 			chip->chging_on = false;
 			chip->batt_full = true;
 			chip->charging_state = CHARGING_STATUS_FULL;
+			/* Force SNK_ONLY on reconnect to prevent CC toggling */
+			oplus_ccdetect_disable();
 		} else {
 			chip->chging_on = true;
 		}

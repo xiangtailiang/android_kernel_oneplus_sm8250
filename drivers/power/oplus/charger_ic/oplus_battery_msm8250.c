@@ -8308,6 +8308,16 @@ static void oplus_ccdetect_work(struct work_struct *work)
 	struct smb_charger *chg = container_of(work, struct smb_charger, ccdetect_work.work);
 	int level;
 
+	/*
+	 * Dev charge limit active: USB is connected, charging stopped.
+	 * Skip all Type-C mode changes to keep CC stable and prevent
+	 * VBUS instability that causes ADB disconnects.
+	 */
+	if (g_oplus_chip && g_oplus_chip->soc >= 75 && g_oplus_chip->charger_exist) {
+		vote(chg->awake_votable, CCDETECT_VOTER, false, 0);
+		return;
+	}
+
 	level = gpio_get_value(chg->ccdetect_gpio);
 	if (level != 1) {
 		oplus_ccdetect_enable();
@@ -10295,6 +10305,8 @@ void oplus_ccdetect_enable(void)
 {
 	int rc;
 	u8 stat;
+	u8 target;
+	u8 mask = TYPEC_POWER_ROLE_CMD_MASK | TYPEC_TRY_MODE_MASK;
 	struct smb_charger *chg = NULL;
 	struct oplus_chg_chip *chip = g_oplus_chip;
 
@@ -10307,25 +10319,29 @@ void oplus_ccdetect_enable(void)
 	if (oplus_ccdetect_check_is_gpio(chip) != true)
 		return;
 
-	rc = smblib_read(chg, TYPE_C_MODE_CFG_REG, &stat);
-	if (rc < 0) {
-		printk(KERN_ERR "[OPLUS_CHG][%s]: 111 Couldn't read 0x1544 rc=%d\n", __func__, rc);
-	} else {
-		printk(KERN_ERR "[OPLUS_CHG][%s]:111 reg0x1544[0x%x], bit[2:0]=0(DRP)\n", __func__, stat);
-	}
-
-	/* set try sink mode */
-	rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG, TYPEC_POWER_ROLE_CMD_MASK | TYPEC_TRY_MODE_MASK,
-				 EN_TRY_SNK_BIT); /*bit[4:0]= 0x10*/
-	if (rc < 0) {
-		printk(KERN_ERR "[OPLUS_CHG][%s]: Couldn't clear 0x1544[0] rc=%d\n", __func__, rc);
-	}
+	/*
+	 * Dev charge limit: force SNK_ONLY to prevent DRP/TRY_SNK CC toggling
+	 * that causes VBUS instability and USB disconnects.
+	 */
+	target = (chip->soc >= 75) ? EN_SNK_ONLY_BIT : EN_TRY_SNK_BIT;
 
 	rc = smblib_read(chg, TYPE_C_MODE_CFG_REG, &stat);
 	if (rc < 0) {
 		printk(KERN_ERR "[OPLUS_CHG][%s]: Couldn't read 0x1544 rc=%d\n", __func__, rc);
+		return;
+	}
+
+	/* Skip redundant write — avoids CC renegotiation */
+	if ((stat & mask) == target) {
+		return;
+	}
+
+	rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG, mask, target);
+	if (rc < 0) {
+		printk(KERN_ERR "[OPLUS_CHG][%s]: Couldn't write 0x1544 rc=%d\n", __func__, rc);
 	} else {
-		printk(KERN_ERR "[OPLUS_CHG][%s]: reg0x1544[0x%x], bit[2:0]=0(DRP)\n", __func__, stat);
+		printk(KERN_ERR "[OPLUS_CHG][%s]: reg0x1544 [0x%x]->[0x%x] target=0x%x\n",
+		       __func__, stat, (stat & ~mask) | target, target);
 	}
 }
 
@@ -10333,10 +10349,10 @@ void oplus_ccdetect_disable(void)
 {
 	int rc;
 	u8 stat;
+	u8 mask = TYPEC_POWER_ROLE_CMD_MASK | TYPEC_TRY_MODE_MASK;
 	struct smb_charger *chg = NULL;
 	struct oplus_chg_chip *chip = g_oplus_chip;
 
-	//return;
 	if (!chip) {
 		printk(KERN_ERR "[OPLUS_CHG][%s]: smb2_chg not ready!\n", __func__);
 		return;
@@ -10347,20 +10363,26 @@ void oplus_ccdetect_disable(void)
 		return;
 
 #ifdef OPLUS_FEATURE_CHG_BASIC
-	/* set sink mode only */
-	rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG, TYPEC_POWER_ROLE_CMD_MASK | TYPEC_TRY_MODE_MASK,
-				 EN_SNK_ONLY_BIT); //bit[4:0]=0x02
-#endif
-	if (rc < 0) {
-		printk(KERN_ERR "[OPLUS_CHG][%s]: Couldn't set 0x1544[2] rc=%d\n", __func__, rc);
-	}
-
 	rc = smblib_read(chg, TYPE_C_MODE_CFG_REG, &stat);
 	if (rc < 0) {
 		printk(KERN_ERR "[OPLUS_CHG][%s]: Couldn't read 0x1544 rc=%d\n", __func__, rc);
-	} else {
-		printk(KERN_ERR "[OPLUS_CHG][%s]: reg0x1544[0x%x], bit[2:0]=4(UFP)\n", __func__, stat);
+		return;
 	}
+
+	/* Skip redundant write — avoids CC renegotiation */
+	if ((stat & mask) == EN_SNK_ONLY_BIT) {
+		return;
+	}
+
+	/* set sink mode only */
+	rc = smblib_masked_write(chg, TYPE_C_MODE_CFG_REG, mask,
+				 EN_SNK_ONLY_BIT); //bit[4:0]=0x02
+	if (rc < 0) {
+		printk(KERN_ERR "[OPLUS_CHG][%s]: Couldn't set 0x1544 rc=%d\n", __func__, rc);
+	} else {
+		printk(KERN_ERR "[OPLUS_CHG][%s]: reg0x1544 [0x%x]->[SNK_ONLY]\n", __func__, stat);
+	}
+#endif
 }
 
 int oplus_ccdetect_get_power_role(void)
