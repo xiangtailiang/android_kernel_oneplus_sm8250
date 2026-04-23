@@ -7634,6 +7634,21 @@ irqreturn_t typec_attach_detach_irq_handler(int irq, void *data)
 
 	attached = !!(stat & TYPEC_ATTACH_DETACH_STATE_BIT);
 
+	/*
+	 * Debounce transient detach events when dev charge limit is active.
+	 * Brief VBUS dips cause PM8150B to report CC detach; if the cable
+	 * is still physically present, CC re-attaches within ~200ms.
+	 * Wait 500ms and re-check before tearing down the USB stack.
+	 */
+	if (!attached && g_oplus_chip && g_oplus_chip->soc >= 75) {
+		msleep(500);
+		rc = smblib_read(chg, TYPE_C_STATE_MACHINE_STATUS_REG, &stat);
+		if (rc == 0 && (stat & TYPEC_ATTACH_DETACH_STATE_BIT)) {
+			pr_info("[OPLUS_CHG] typec_debounce: transient detach ignored\n");
+			return IRQ_HANDLED;
+		}
+	}
+
 	if (attached) {
 #ifdef OPLUS_FEATURE_CHG_BASIC
 		smblib_lpd_clear_ra_open_work(chg);
@@ -8331,7 +8346,7 @@ static void oplus_ccdetect_work(struct work_struct *work)
 	 * Skip all Type-C mode changes to keep CC stable and prevent
 	 * VBUS instability that causes ADB disconnects.
 	 */
-	if (g_oplus_chip && g_oplus_chip->soc >= 75 && g_oplus_chip->charger_exist) {
+	if (g_oplus_chip && g_oplus_chip->soc >= 75) {
 		vote(chg->awake_votable, CCDETECT_VOTER, false, 0);
 		return;
 	}

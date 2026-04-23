@@ -7893,8 +7893,6 @@ void oplus_chg_variables_reset(struct oplus_chg_chip *chip, bool in)
 			chip->chging_on = false;
 			chip->batt_full = true;
 			chip->charging_state = CHARGING_STATUS_FULL;
-			/* Force SNK_ONLY on reconnect to prevent CC toggling */
-			oplus_ccdetect_disable();
 		} else {
 			chip->chging_on = true;
 		}
