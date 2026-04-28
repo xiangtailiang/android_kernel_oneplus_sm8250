@@ -7600,6 +7600,26 @@ irqreturn_t typec_state_change_irq_handler(int irq, void *data)
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: cc-state-change; Type-C %s detected\n",
 		   smblib_typec_mode_name[chg->typec_mode]);
 
+	/*
+	 * Debounce CC-state-change → power_supply_changed notification.
+	 * This is the path that triggers: usbpd disconnect → DWC3 low power
+	 * → USB_STATE=DISCONNECTED within 3ms of CC dropping.
+	 * Without debounce here, the other two debounces (typec_attach_detach
+	 * and usb_plugin) fire too late — DWC3 is already down.
+	 */
+	if (chg->typec_mode == POWER_SUPPLY_TYPEC_NONE &&
+	    g_oplus_chip && g_oplus_chip->soc >= 75) {
+		int recheck_mode;
+
+		msleep(500);
+		recheck_mode = smblib_get_prop_typec_mode(chg);
+		if (recheck_mode != POWER_SUPPLY_TYPEC_NONE) {
+			chg->typec_mode = recheck_mode;
+			pr_info("[OPLUS_CHG] cc_state_debounce: transient CC drop ignored\n");
+			return IRQ_HANDLED;
+		}
+	}
+
 	power_supply_changed(chg->usb_psy);
 
 	return IRQ_HANDLED;
