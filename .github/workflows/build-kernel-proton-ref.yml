@@ -58,6 +58,12 @@ jobs:
       - name: Build kernel (reference style, LLVM_IAS=1)
         run: |
           set -o pipefail
+          # qcacld-3.0's per-file -I$(srctree)/... explosion overflows ARG_MAX
+          # ("Argument list too long") on the long workspace path. Bind-mount the
+          # tree at a short path so srctree (and every -I) is short. A symlink
+          # won't do: make's getcwd() resolves it back to the long real path.
+          sudo mkdir -p /k && sudo mount --bind "$GITHUB_WORKSPACE" /k
+          cd /k
           export PATH="$HOME/clang/bin:$PATH"
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
