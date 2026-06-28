@@ -1,0 +1,139 @@
+name: Build Kernel (OnePlus 8T / sm8250 kona)
+
+# Builds the OnePlus 8T (kebab) kernel with the production config
+# (vendor/kona-perf_defconfig + vendor/oplus.config, full LTO+CFI) using
+# AOSP clang r416183b, and packages a kernel-only AnyKernel3 flashable zip.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/usb-vbus-glitch-debounce
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          docker-images: true
+          large-packages: false
+          swap-storage: false
+
+      - name: Set up build dir on /mnt and add swap
+        run: |
+          # Build into /mnt (the large ~67G ephemeral disk) via an "out" symlink,
+          # so the full-LTO object tree does not fill the small root fs.
+          sudo mkdir -p /mnt/out
+          sudo chown "$USER":"$(id -gn)" /mnt/out
+          ln -sfn /mnt/out out
+          # Extra swap to give the LTO/CFI vmlinux link headroom.
+          sudo fallocate -l 8G /swapfile && sudo chmod 600 /swapfile \
+            && sudo mkswap /swapfile && sudo swapon /swapfile || true
+          echo "=== disk ==="; df -h / /mnt
+          echo "=== mem ==="; free -h
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ca-certificates cpio curl flex git kmod \
+            libelf-dev libssl-dev lld llvm make python3 xz-utils zip \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
+
+      - name: Set up clang toolchain (proton-clang)
+        run: |
+          # AOSP gitiles +archive refuses to pack the large clang dir (HTTP 400),
+          # so use proton-clang: a GitHub-hosted clang that bundles the
+          # aarch64-linux-gnu- / arm-linux-gnueabi- cross binutils.
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang "$HOME/clang"
+          "$HOME/clang/bin/clang" --version | head -1
+          "$HOME/clang/bin/aarch64-linux-gnu-ld" --version | head -1
+
+      - name: Build kernel
+        run: |
+          set -o pipefail
+          export PATH="$HOME/clang/bin:$PATH"
+          export ARCH=arm64 SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+          export KBUILD_BUILD_USER=actions KBUILD_BUILD_HOST=github
+          # LLVM=1 makes the host tools (fixdep, kconfig, modpost) use clang +
+          # ld.lld too, so proton's modern lld handles the runner's glibc
+          # (.relr.dyn) -- proton's bundled old GNU ld cannot. LLVM_IAS=0 keeps
+          # the GNU assembler, which this 4.19 tree was written against.
+          MK="O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=0"
+          make $MK vendor/kona-perf_defconfig
+          ./scripts/kconfig/merge_config.sh -m -O out \
+            out/.config arch/arm64/configs/vendor/oplus.config
+          make $MK olddefconfig
+          # the patched driver must actually be compiled in
+          grep -q "CONFIG_OPLUS_SM8250_CHARGER=y" out/.config \
+            || { echo "ERROR: oplus charger (patched driver) not enabled"; exit 1; }
+          make -j"$(nproc)" $MK KCFLAGS="-Wno-error" 2>&1 | tee build.log
+          echo "=== boot outputs ==="
+          ls -la out/arch/arm64/boot/
+
+      - name: Package AnyKernel3 flashable zip
+        if: success()
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
+          rm -f AnyKernel3/Image* AnyKernel3/zImage AnyKernel3/*-dtb \
+            AnyKernel3/*.dtb AnyKernel3/dtbo.img || true
+          cp .github/anykernel/anykernel.sh AnyKernel3/anykernel.sh
+          if [ -f out/arch/arm64/boot/Image.gz ]; then
+            cp out/arch/arm64/boot/Image.gz AnyKernel3/Image.gz
+          else
+            cp out/arch/arm64/boot/Image AnyKernel3/Image
+          fi
+          ( cd AnyKernel3 && zip -r9 ../OnePlus8T-sm8250-vbusfix-AnyKernel3.zip . -x '.git*' )
+          ls -la *.zip
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OnePlus8T-kernel
+          path: |
+            OnePlus8T-sm8250-vbusfix-AnyKernel3.zip
+            out/arch/arm64/boot/Image.gz
+            out/arch/arm64/boot/Image
+            out/.config
+            build.log
+          if-no-files-found: warn
+
+      - name: Publish GitHub Release
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: vbusfix-${{ github.run_id }}
+          name: OnePlus 8T sm8250 USB vbus-glitch fix (build ${{ github.run_number }})
+          body: |
+            Kernel build for **OnePlus 8T (kebab / sm8250)** with the USB VBUS
+            plug-out debounce fix — stops ADB dropping/re-enumerating while the
+            battery sits at full charge.
+
+            - Branch: `${{ github.ref_name }}`
+            - Commit: ${{ github.sha }}
+            - Config: `vendor/kona-perf_defconfig` + `vendor/oplus.config` (full LTO + CFI)
+            - Toolchain: proton-clang
+
+            Flash `OnePlus8T-sm8250-vbusfix-AnyKernel3.zip` with a kernel flasher
+            or custom recovery (kernel-only; ramdisk/dtb are kept). Test at your
+            own risk.
+          files: |
+            OnePlus8T-sm8250-vbusfix-AnyKernel3.zip
+            out/arch/arm64/boot/Image.gz
+            out/.config
