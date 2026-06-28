@@ -14,7 +14,9 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # ubuntu-22.04 (glibc 2.35) does not emit .relr.dyn, so proton-clang's
+    # bundled GNU ld can still link the host tools. Newer images (24.04) break it.
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
