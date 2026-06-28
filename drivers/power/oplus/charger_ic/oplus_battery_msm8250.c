@@ -6741,6 +6741,27 @@ void smblib_usb_plugin_locked(struct smb_charger *chg)
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: usbin-plugin %s\n", vbus_rising ? "attached" : "detached");
 }
 
+#ifdef OPLUS_FEATURE_CHG_BASIC
+/*
+ * Spurious VBUS plug-out debounce.
+ *
+ * On the 2S MP2650 design, stopping charge at "battery full"
+ * (mp2650_disable_charging opens the charge FET) briefly perturbs
+ * VBUS/VSYS, and the PMIC then latches a false USBIN plug-out. The
+ * plug-out path tears down the USB data session (charger_type ->
+ * UNKNOWN, USB_STATE=DISCONNECTED) and forces a re-enumeration, so
+ * ADB drops every time the pack re-trips "full" (~tens of seconds)
+ * while sitting at 100%. A genuine cable removal holds VBUS low; this
+ * glitch recovers within a few tens of ms (~31ms observed). Re-sample
+ * USBIN before honouring a plug-out and drop it if VBUS comes back, so
+ * the session is left intact. Charge-termination/recharge logic is
+ * untouched (full still stops charging) -- this only filters the
+ * false disconnect.
+ */
+#define OPLUS_VBUS_GLITCH_DEBOUNCE_MS		20	/* per re-sample */
+#define OPLUS_VBUS_GLITCH_DEBOUNCE_RETRIES	6	/* up to ~120 ms */
+#endif /*OPLUS_FEATURE_CHG_BASIC*/
+
 irqreturn_t usb_plugin_irq_handler(int irq, void *data)
 {
 	struct smb_irq_data *irq_data = data;
@@ -6754,6 +6775,31 @@ irqreturn_t usb_plugin_irq_handler(int irq, void *data)
 		if (typec_mode == POWER_SUPPLY_TYPEC_SINK || typec_mode == POWER_SUPPLY_TYPEC_SINK_POWERED_CABLE) {
 			pr_info("%s:chg->typec_mode = sink return!\n", __func__);
 			return IRQ_HANDLED;
+		}
+	}
+#endif /*OPLUS_FEATURE_CHG_BASIC*/
+
+#ifdef OPLUS_FEATURE_CHG_BASIC
+	if (!chg->pd_hard_reset) {
+		int rc;
+		u8 stat;
+
+		rc = smblib_read(chg, USBIN_BASE + INT_RT_STS_OFFSET, &stat);
+		if (rc >= 0 && !(stat & USBIN_PLUGIN_RT_STS_BIT)) {
+			int i;
+
+			for (i = 0; i < OPLUS_VBUS_GLITCH_DEBOUNCE_RETRIES; i++) {
+				msleep(OPLUS_VBUS_GLITCH_DEBOUNCE_MS);
+				rc = smblib_read(chg, USBIN_BASE + INT_RT_STS_OFFSET, &stat);
+				if (rc < 0)
+					break;
+				if (stat & USBIN_PLUGIN_RT_STS_BIT) {
+					printk(KERN_ERR "!!!!! %s: ignore spurious vbus plug-out, recovered in ~%dms\n",
+					       __func__,
+					       (i + 1) * OPLUS_VBUS_GLITCH_DEBOUNCE_MS);
+					return IRQ_HANDLED;
+				}
+			}
 		}
 	}
 #endif /*OPLUS_FEATURE_CHG_BASIC*/
